@@ -1,0 +1,12 @@
+{
+  "appId": "com.ntalk.app",
+  "appName": "NTalk",
+  "webDir": "www",
+  "server": {
+    "url": "https://YOUR-SITE-URL-HERE",
+    "cleartext": false
+  },
+  "android": {
+    "allowMixedContent": false
+  }
+}
