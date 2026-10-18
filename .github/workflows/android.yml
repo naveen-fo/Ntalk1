@@ -2,48 +2,72 @@ name: Build Android APK
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
 
 jobs:
-  build:
+  apk:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      - name: Setup Java
-        uses: actions/setup-java@v4
+      - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 21
+          java-version: 17
 
-      - name: Install dependencies
+      - name: Check site URL is set
+        run: |
+          if grep -q "YOUR-SITE-URL-HERE" capacitor.config.json; then
+            echo "capacitor.config.json lo server.url ni mee deployed https URL tho marchandi"; exit 1
+          fi
+
+      - name: Install
         run: npm install
 
-      - name: Build web app
-        run: npm run build
-
-      - name: Create Android project
+      - name: Web files
         run: |
-          npm install @capacitor/android
-          npx cap add android
-          npx cap sync android
+          mkdir -p www
+          cp -r index.html app.js style.css config.js sw.js manifest.json icon.svg icons favicon.ico www/
+
+      - name: Add Android platform
+        run: npx cap add android
+
+      - name: Screenshot block (FLAG_SECURE) + permissions
+        run: |
+          cp android-patch/MainActivity.java android/app/src/main/java/com/ntalk/app/MainActivity.java
+          python3 - <<'PY'
+          p='android/app/src/main/AndroidManifest.xml'
+          s=open(p).read()
+          extra='''
+              <uses-permission android:name="android.permission.CAMERA" />
+              <uses-permission android:name="android.permission.RECORD_AUDIO" />
+              <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+              <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+              <uses-feature android:name="android.hardware.camera" android:required="false" />
+              <uses-feature android:name="android.hardware.microphone" android:required="false" />
+          '''
+          marker='<uses-permission android:name="android.permission.INTERNET" />'
+          assert marker in s
+          s=s.replace(marker, marker+extra)
+          open(p,'w').write(s)
+          PY
+          grep -c FLAG_SECURE android/app/src/main/java/com/ntalk/app/MainActivity.java
+
+      - name: App icon
+        continue-on-error: true
+        run: npx --yes @capacitor/assets generate --android --iconBackgroundColor '#0b1026' --iconBackgroundColorDark '#0b1026'
+
+      - name: Sync
+        run: npx cap sync android
 
       - name: Build APK
-        run: |
-          cd android
-          chmod +x gradlew
-          ./gradlew assembleDebug
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: Ntalk1-APK
+          name: NTalk-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
