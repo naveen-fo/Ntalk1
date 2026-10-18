@@ -3,7 +3,7 @@
   "appName": "NTalk",
   "webDir": "www",
   "server": {
-    "url": "https://YOUR-SITE-URL-HERE",
+    "url": "https://naveen-fo.github.io/Ntalk1/",
     "cleartext": false
   },
   "android": {
