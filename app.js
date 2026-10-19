@@ -982,7 +982,7 @@ function handleLaunchParams(){
 }
 
 /* =====================  STATUS / STORY  ===================== */
-const STATUS_COLORS=["#128c7e","#7c5cff","#e11d48","#0ea5e9","#f59e0b","#16a34a","#475569"];
+const STATUS_COLORS=["#e0307f","#ff4d9d","#c026d3","#f43f5e","#fb7185","#d6307f","#9d174d"];
 const safeColor=c=>/^#[0-9a-fA-F]{6}$/.test(c||"")?c:STATUS_COLORS[0];
 function timeAgo(ts){
  const s=(Date.now()-new Date(ts).getTime())/1000;
