@@ -83,6 +83,17 @@ jobs:
 
       - name: Sync
         run: npx cap sync android
+      - name: Sync
+        run: npx cap sync android
+
+      - name: Remove adaptive icon XML (avoid broken background ref)
+        run: |
+          rm -f android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
+          rm -f android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml
+
+      - name: Build APK
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon
 
       - name: Build APK
         working-directory: android
