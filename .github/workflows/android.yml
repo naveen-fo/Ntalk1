@@ -71,6 +71,11 @@ jobs:
           open(p,'w').write(s)
           PY
           grep -c FLAG_SECURE android/app/src/main/java/com/ntalk/app/MainActivity.java
+          - name: Prepare icon source
+                  run: |
+                    mkdir -p assets
+                    cp icon.svg assets/icon-only.svg
+                    cp icon.svg assets/icon-foreground.svg
 
       - name: App icon
         continue-on-error: true
