@@ -35,15 +35,19 @@ jobs:
       - name: Add Android platform
         run: npx cap add android
 
-      - name: Screenshot block (FLAG_SECURE) + permissions
+      - name: Screenshot block, Google login deep link, back button, permissions
         run: |
           mkdir -p android/app/src/main/java/com/ntalk/app
           cat > android/app/src/main/java/com/ntalk/app/MainActivity.java <<'EOF'
           package com.ntalk.app;
 
+          import android.content.Intent;
+          import android.net.Uri;
           import android.os.Bundle;
           import android.view.WindowManager;
+          import android.webkit.ValueCallback;
           import com.getcapacitor.BridgeActivity;
+          import org.json.JSONObject;
 
           public class MainActivity extends BridgeActivity {
               @Override
@@ -51,6 +55,31 @@ jobs:
                   super.onCreate(savedInstanceState);
                   getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE,
                                        WindowManager.LayoutParams.FLAG_SECURE);
+              }
+
+              @Override
+              protected void onNewIntent(Intent intent) {
+                  super.onNewIntent(intent);
+                  Uri data = intent == null ? null : intent.getData();
+                  if (data != null && "com.ntalk.app".equals(data.getScheme())) {
+                      String js = "window.ntalkAuthCallback && window.ntalkAuthCallback("
+                              + JSONObject.quote(data.toString()) + ")";
+                      getBridge().getWebView().evaluateJavascript(js, null);
+                  }
+              }
+
+              @Override
+              public void onBackPressed() {
+                  getBridge().getWebView().evaluateJavascript(
+                      "typeof topLayerClose==='function' && topLayerClose()",
+                      new ValueCallback<String>() {
+                          @Override
+                          public void onReceiveValue(String value) {
+                              if (!"true".equals(value)) {
+                                  MainActivity.super.onBackPressed();
+                              }
+                          }
+                      });
               }
           }
           EOF
@@ -68,21 +97,30 @@ jobs:
           marker='<uses-permission android:name="android.permission.INTERNET" />'
           assert marker in s
           s=s.replace(marker, marker+extra)
+          deeplink='''
+                  <intent-filter>
+                      <action android:name="android.intent.action.VIEW" />
+                      <category android:name="android.intent.category.DEFAULT" />
+                      <category android:name="android.intent.category.BROWSABLE" />
+                      <data android:scheme="com.ntalk.app" android:host="auth" />
+                  </intent-filter>
+          '''
+          assert '</activity>' in s
+          s=s.replace('</activity>', deeplink+'        </activity>',1)
           open(p,'w').write(s)
           PY
           grep -c FLAG_SECURE android/app/src/main/java/com/ntalk/app/MainActivity.java
+          grep -c 'android:scheme="com.ntalk.app"' android/app/src/main/AndroidManifest.xml
+
       - name: Prepare icon source
         run: |
           mkdir -p assets
           cp icon.svg assets/icon-only.svg
-          cp icon.svg assets/icon-foreground.svg
 
       - name: App icon
         continue-on-error: true
-        run: npx --yes @capacitor/assets generate --android --iconBackgroundColor '#0b1026' --iconBackgroundColorDark '#0b1026'
+        run: npx --yes @capacitor/assets generate --android --iconBackgroundColor '#2a0f20' --iconBackgroundColorDark '#2a0f20'
 
-      - name: Sync
-        run: npx cap sync android
       - name: Sync
         run: npx cap sync android
 
@@ -95,11 +133,8 @@ jobs:
         working-directory: android
         run: ./gradlew assembleDebug --no-daemon
 
-      - name: Build APK
-        working-directory: android
-        run: ./gradlew assembleDebug --no-daemon
-
-      - uses: actions/upload-artifact@v4
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
         with:
           name: NTalk-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
