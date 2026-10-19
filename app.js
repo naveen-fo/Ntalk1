@@ -1369,11 +1369,23 @@ async function announceGroupReady(from,room){
  try{await (state.signalReady||Promise.resolve());await signal({kind:"g_ready",to:from,room})}catch(e){console.warn(e)}
 }
 const GOOGLE_SVG=`<svg viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.5l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.5 5.4 2.6 13.2l7.9 6.1C12.4 13.6 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.3 5.5-4.8 7.2l7.5 5.8c4.4-4.1 7.1-10.1 7.1-17.5z"/><path fill="#FBBC05" d="M10.5 28.7c-.5-1.5-.8-3-.8-4.7s.3-3.2.8-4.7l-7.9-6.1C.9 16.4 0 20.1 0 24s.9 7.6 2.6 10.8l7.9-6.1z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.5-5.8c-2.1 1.4-4.8 2.3-8.4 2.3-6.3 0-11.6-4.1-13.5-9.8l-7.9 6.1C6.5 42.6 14.6 48 24 48z"/></svg>`;
+const IS_NATIVE_APP=!!(window.Capacitor&&typeof window.Capacitor.isNativePlatform==="function"&&window.Capacitor.isNativePlatform());
 async function googleLogin(){
  if(!hasSupabase)return alert("Supabase configuration missing.");
- const {error}=await sb.auth.signInWithOAuth({provider:"google",options:{redirectTo:location.origin+location.pathname}});
+ const redirectTo=IS_NATIVE_APP?"com.ntalk.app://auth":location.origin+location.pathname;
+ const {error}=await sb.auth.signInWithOAuth({provider:"google",options:{redirectTo}});
  if(error)alert(error.message);
 }
+window.ntalkAuthCallback=async function(url){
+ try{
+  const q=String(url).split("#")[1]||String(url).split("?")[1]||"";
+  const p=new URLSearchParams(q);
+  const at=p.get("access_token"),rt=p.get("refresh_token"),code=p.get("code"),err=p.get("error_description");
+  if(err){alert(err);return}
+  if(at&&rt){const {error}=await sb.auth.setSession({access_token:at,refresh_token:rt});if(error)throw error;location.reload();return}
+  if(code){const {error}=await sb.auth.exchangeCodeForSession(code);if(error)throw error;location.reload();return}
+ }catch(e){alert("Google login failed: "+(e&&e.message?e.message:e))}
+};
 function setupView(){
  const u=state.user||{};
  return `<main class="auth"><section class="auth-card"><div class="brand"><div class="logo">N</div><div><h1>NTalk</h1><p>Set up your profile</p></div></div>
