@@ -30,7 +30,7 @@ jobs:
       - name: Web files
         run: |
           mkdir -p www
-          cp -r index.html app.js style.css config.js sw.js manifest.json icon.svg icons favicon.ico www/
+          cp index.html app.js style.css config.js sw.js manifest.json icon.svg favicon.ico www/
 
       - name: Add Android platform
         run: npx cap add android
