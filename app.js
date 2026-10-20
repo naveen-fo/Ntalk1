@@ -208,7 +208,7 @@ async function loadChats(){
  const activeId=state.chats[state.activeChat]?.id;
  state.chats=result;
  if(activeId){const k=result.findIndex(c=>c.id===activeId);state.activeChat=k>=0?k:null}
- updatePresenceFlags();updateBadge();
+ updatePresenceFlags();updateBadge();refreshDisappearModes();
 }
 function updatePresenceFlags(){
  const online=new Set(state.onlineUsers||[]);
@@ -247,7 +247,7 @@ const senderName=id=>state.people.find(p=>p.id===id)?.display_name||"Member";
 function conversation(){
  const c=state.chats[state.activeChat];
  if(!c)return `<div class="empty"><div class="logo">N</div><h2>Choose a chat</h2><p>Open People to start a private chat.</p></div>`;
- const sub=convStatusText(c);
+ const sub=convStatusText(c)+dmBadge(c);
  const calls=c.is_group?`<button onclick="startGroupCall('voice')" title="Group voice call">${ico("phone")}</button><button onclick="startGroupCall('video')" title="Group video call">${ico("video")}</button>`:`<button onclick="startCall('voice')">${ico("phone")}</button><button onclick="startCall('video')">${ico("video")}</button>`;
  const rb=state.replyTo?`<div class="reply-bar"><div class="rb-body"><b>${esc(state.replyTo.name)}</b><span>${esc(state.replyTo.text)}</span></div><button type="button" onclick="cancelReply()">✕</button></div>`:"";
  return `<section class="conversation"><header class="chat-head" onclick="headClick(event)"><button class="mobile-back" onclick="state.activeChat=null;render()">‹</button>
@@ -277,7 +277,7 @@ function messageBubble(m){
  }
  let tick="";
  if(mine)tick=c?.is_group?`<span class="tick">✓</span>`:m.seen_at?`<span class="tick seen">✓✓</span>`:m.delivered_at?`<span class="tick">✓✓</span>`:`<span class="tick">✓</span>`;
- return `<div class="bubble ${mine?"me":"them"}" data-mid="${m.id}">${who}${quote}${body}<small>${fmt(m.created_at)}${tick}</small></div>`;
+ return `<div class="bubble ${mine?"me":"them"}${m._fading?" vanishing":""}" data-mid="${m.id}">${who}${quote}${body}<small>${vtimer(m)}${fmt(m.created_at)}${tick}</small></div>`;
 }
 async function loadMedia(id){
  const m=state.messages.find(x=>x.id===id);if(!m)return;
@@ -352,6 +352,7 @@ async function subscribeMessageChannel(){
    state._ntT=setTimeout(async()=>{await loadNotes();if(state.page==="chats")render()},400);
  })
  .subscribe();
+ subscribeVanishChannel();
 }
 async function onNewMessage(payload){
  const m=payload.new;
@@ -378,8 +379,8 @@ function onMessageUpdate(payload){
  const i=state.messages.findIndex(x=>x.id===m.id);
  if(i<0)return;
  const o=state.messages[i];
- if(o.delivered_at===m.delivered_at&&o.seen_at===m.seen_at)return;
- state.messages[i]={...o,delivered_at:m.delivered_at,seen_at:m.seen_at};
+ if(o.delivered_at===m.delivered_at&&o.seen_at===m.seen_at&&o.expires_at===m.expires_at)return;
+ state.messages[i]={...o,delivered_at:m.delivered_at,seen_at:m.seen_at,expires_at:m.expires_at};
  render();
 }
 async function setupTyping(){
@@ -888,6 +889,137 @@ async function markDeliveredAll(){
  try{await sb.from("messages").update({delivered_at:new Date().toISOString()}).neq("sender_id",uid()).is("delivered_at",null)}catch(e){console.warn(e)}
 }
 
+/* =====================  DISAPPEARING MESSAGES + DELETE FOR EVERYONE  ===================== */
+const DM={modes:{},offset:0,started:false};
+function dmNow(){return Date.now()+DM.offset}
+function dmMode(c){return c?(DM.modes[c.id]||"off"):"off"}
+function dmName(m){return m==="after_seen"?"After seen":m==="5m"?"5 minutes":m==="24h"?"24 hours":"Off"}
+function dmBadge(c){const m=dmMode(c);return m==="off"?"":" \u00b7 \u23F1 "+(m==="after_seen"?"after seen":m==="5m"?"5 min":"24 h")}
+function vtimer(m){return(m.expires_at||m.vanish_after_seen)?`<span class="vtimer" title="Disappearing message">\u23F1</span>`:""}
+async function syncClock(){
+ try{
+  const t0=Date.now();
+  const {data,error}=await sb.rpc("server_now");
+  if(error||!data)return;
+  DM.offset=Date.parse(data)-(t0+Date.now())/2;
+ }catch(e){}
+}
+async function refreshDisappearModes(){
+ if(!hasSupabase||!uid())return;
+ try{
+  const {data,error}=await sb.rpc("get_disappear_modes");
+  if(error||!data)return;
+  let changed=false;
+  data.forEach(r=>{if(DM.modes[r.chat_id]!==r.mode){DM.modes[r.chat_id]=r.mode;changed=true}});
+  if(changed&&state.activeChat!==null)render();
+ }catch(e){}
+}
+function dmRefreshChats(){
+ clearTimeout(DM._ct);
+ DM._ct=setTimeout(async()=>{
+  try{await loadChats();if(state.page==="chats"||state.page==="groups")render()}catch(e){}
+ },1500);
+}
+function vanishTick(){
+ if(!state.user||!state.messages.length)return;
+ const now=dmNow();let any=false;
+ for(const m of state.messages){
+  if(!m.expires_at)continue;
+  const left=Date.parse(m.expires_at)-now;
+  if(left<=0){m._gone=true;any=true}
+  else if(left<=600&&!m._fading){
+   m._fading=true;
+   document.querySelector(`.bubble[data-mid="${m.id}"]`)?.classList.add("vanishing");
+  }
+ }
+ if(!any)return;
+ const gone=state.messages.filter(m=>m._gone);
+ state.messages=state.messages.filter(m=>!m._gone);
+ gone.forEach(m=>{if(m.sender_id===uid()&&m.file_path)sb.storage.from("ntalk-media").remove([m.file_path]).then(()=>{},()=>{})});
+ if(state.replyTo&&gone.some(m=>m.id===state.replyTo.id))state.replyTo=null;
+ render();
+ const c=state.chats[state.activeChat];
+ if(c&&gone.some(m=>m.created_at===c.time))dmRefreshChats();
+}
+async function purgeExpired(){
+ if(!hasSupabase||!uid())return;
+ try{await sb.rpc("purge_expired_messages")}catch(e){}
+}
+function startVanish(){
+ syncClock();purgeExpired();refreshDisappearModes();
+ if(DM.started)return;
+ DM.started=true;
+ setInterval(vanishTick,150);
+ setInterval(purgeExpired,120000);
+ setInterval(syncClock,600000);
+}
+async function subscribeVanishChannel(){
+ if(!hasSupabase||!uid())return;
+ if(state.vch&&state.vchUser===uid())return;
+ try{
+  if(state.vch)await sb.removeChannel(state.vch);
+  state.vchUser=uid();
+  state.vch=sb.channel("ntalk-vanish-"+uid())
+  .on("postgres_changes",{event:"DELETE",schema:"public",table:"messages"},onMessageDelete)
+  .on("postgres_changes",{event:"UPDATE",schema:"public",table:"chats"},onChatUpdate)
+  .subscribe();
+ }catch(e){console.warn("vanish channel",e)}
+}
+function onMessageDelete(payload){
+ const id=payload.old&&payload.old.id;
+ if(!id)return;
+ const i=state.messages.findIndex(x=>x.id===id);
+ if(i<0){dmRefreshChats();return}
+ const m=state.messages[i];
+ state.messages.splice(i,1);
+ if(state.replyTo&&state.replyTo.id===id)state.replyTo=null;
+ render();
+ const c=state.chats[state.activeChat];
+ if(c&&c.time===m.created_at)dmRefreshChats();
+}
+function onChatUpdate(payload){
+ const n=payload.new;
+ if(!n||!n.id||typeof n.disappear_mode!=="string")return;
+ const was=DM.modes[n.id]||"off";
+ if(was===n.disappear_mode)return;
+ DM.modes[n.id]=n.disappear_mode;
+ const c=state.chats.find(x=>x.id===n.id);
+ if(c&&!isSecret(c.id))showToast("Disappearing messages",`${c.name}: ${dmName(n.disappear_mode)}`,c.id);
+ if(state.activeChat!==null)render();
+}
+async function deleteForEveryone(id){
+ closeModal();
+ const m=state.messages.find(x=>x.id===id);
+ if(!m||m.sender_id!==uid())return;
+ if(!confirm("Delete this message for everyone?"))return;
+ const {data,error}=await sb.rpc("delete_message_for_everyone",{p_id:id});
+ if(error)return alert(error.message);
+ state.messages=state.messages.filter(x=>x.id!==id);
+ if(state.replyTo&&state.replyTo.id===id)state.replyTo=null;
+ if(data)sb.storage.from("ntalk-media").remove([data]).then(()=>{},()=>{});
+ render();
+ const c=state.chats[state.activeChat];
+ if(c&&c.time===m.created_at)dmRefreshChats();
+}
+function openDisappearing(){
+ const c=state.chats[state.activeChat];if(!c)return;
+ closeModal();
+ const cur=dmMode(c);
+ const canSet=!c.is_group||c.created_by===uid();
+ const opts=[["off","Off"]];
+ if(!c.is_group)opts.push(["after_seen","After seen (2 sec)"]);
+ opts.push(["5m","5 minutes"],["24h","24 hours"]);
+ document.body.insertAdjacentHTML("beforeend",`<div id="modalRoot" class="modal-back" onclick="if(event.target===this)closeModal()"><div class="modal"><h3 class="dm-title">\u23F1 Disappearing messages</h3><p class="dm-note">${c.is_group&&!canSet?"Only the group admin can change this. ":""}Applies to new messages only.</p>${opts.map(([v,l])=>`<button class="menu-btn${v===cur?" dm-on":""}"${canSet?"":" disabled"} onclick="setDisappearing('${v}')">${v===cur?"\u2713 ":""}${l}</button>`).join("")}<button class="menu-btn" onclick="closeModal()">Close</button></div></div>`);
+}
+async function setDisappearing(mode){
+ const c=state.chats[state.activeChat];if(!c)return;
+ closeModal();
+ const {error}=await sb.rpc("set_disappearing",{p_chat:c.id,p_mode:mode});
+ if(error)return alert(error.message);
+ DM.modes[c.id]=mode;
+ render();
+}
+
 /* =====================  REPLY  ===================== */
 function msgSnippet(m){
  if(m.content)return m.content;
@@ -897,7 +1029,7 @@ function msgSnippet(m){
 function openMsgMenu(id){
  const m=state.messages.find(x=>x.id===id);if(!m)return;
  closeModal();
- document.body.insertAdjacentHTML("beforeend",`<div id="modalRoot" class="modal-back" onclick="if(event.target===this)closeModal()"><div class="modal"><button class="menu-btn" onclick="replyToMsg('${m.id}')">↩ Reply</button>${m.content?`<button class="menu-btn" onclick="copyMsg('${m.id}')">⧉ Copy</button>`:""}<button class="menu-btn" onclick="closeModal()">Cancel</button></div></div>`);
+ document.body.insertAdjacentHTML("beforeend",`<div id="modalRoot" class="modal-back" onclick="if(event.target===this)closeModal()"><div class="modal"><button class="menu-btn" onclick="replyToMsg('${m.id}')">↩ Reply</button>${m.content?`<button class="menu-btn" onclick="copyMsg('${m.id}')">⧉ Copy</button>`:""}${m.sender_id===uid()?`<button class="menu-btn del" onclick="deleteForEveryone('${m.id}')">🗑 Delete for everyone</button>`:""}<button class="menu-btn" onclick="closeModal()">Cancel</button></div></div>`);
 }
 async function copyMsg(id){
  const m=state.messages.find(x=>x.id===id);closeModal();if(!m||!m.content)return;
@@ -1552,7 +1684,7 @@ function chatInfo(){
  const c=state.chats[state.activeChat];if(!c)return;
  closeModal();
  const sec=isSecret(c.id);
- document.body.insertAdjacentHTML("beforeend",`<div id="modalRoot" class="modal-back" onclick="if(event.target===this)closeModal()"><div class="modal"><button class="menu-btn" onclick="closeModal();${c.is_group?"groupInfo()":"openProfileCard()"}">${c.is_group?"Group info":"Contact info"}</button><button class="menu-btn" onclick="toggleSecretChat('${c.id}')">${ico("lock")} ${sec?"Remove from secret chats":"Move to secret chats"}</button><button class="menu-btn" onclick="closeModal()">Cancel</button></div></div>`);
+ document.body.insertAdjacentHTML("beforeend",`<div id="modalRoot" class="modal-back" onclick="if(event.target===this)closeModal()"><div class="modal"><button class="menu-btn" onclick="closeModal();${c.is_group?"groupInfo()":"openProfileCard()"}">${c.is_group?"Group info":"Contact info"}</button><button class="menu-btn" onclick="toggleSecretChat('${c.id}')">${ico("lock")} ${sec?"Remove from secret chats":"Move to secret chats"}</button><button class="menu-btn" onclick="openDisappearing()">⏱ Disappearing messages</button><button class="menu-btn" onclick="closeModal()">Cancel</button></div></div>`);
 }
 async function toggleSecretChat(id){
  closeModal();
@@ -1947,6 +2079,7 @@ function injectCriticalCss(){
 async function initBackend(){ await loadNicknames();
  await loadPeople();await loadChats();
  await subscribeMessageChannel();await setupTyping();await initPresence();await setupSignaling();
+ startVanish();
  loadPrivacy();loadSecretMeta();startLastSeen();loadNotes().then(()=>{if(state.page==="chats")render()});cleanupMyNote();markDeliveredAll();
  loadStatuses().then(()=>{cleanupMyStatuses();if(state.page==="chats"&&!state.story)render()});
  if("Notification" in window&&Notification.permission==="granted")registerPush();

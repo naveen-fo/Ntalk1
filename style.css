@@ -481,3 +481,12 @@ body.in-chat .sidebar{display:none !important}
   body.in-chat .main{height:100dvh !important}
   .shorts{height:100dvh}
 }
+
+/* ===== NTalk: disappearing messages + delete for everyone ===== */
+.bubble.vanishing{opacity:0;transform:scale(.9);transition:opacity .55s ease,transform .55s ease}
+.vtimer{font-size:10px;opacity:.8;margin-right:5px}
+.menu-btn.del{color:var(--danger)}
+.menu-btn.dm-on{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff}
+.menu-btn:disabled{opacity:.45;cursor:not-allowed}
+.dm-title{margin:0 0 4px;font-size:17px}
+.dm-note{margin:0 0 12px;font-size:12px;color:var(--muted)}
