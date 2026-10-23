@@ -35,21 +35,26 @@ jobs:
       - name: Add Android platform
         run: npx cap add android
 
-      - name: Screenshot block, Google login deep link, back button, permissions
+      - name: Screenshot block, Google login deep link, back button and exit dialog, permissions
         run: |
           mkdir -p android/app/src/main/java/com/ntalk/app
           cat > android/app/src/main/java/com/ntalk/app/MainActivity.java <<'EOF'
           package com.ntalk.app;
 
+          import android.app.AlertDialog;
+          import android.content.DialogInterface;
           import android.content.Intent;
           import android.net.Uri;
           import android.os.Bundle;
+          import android.view.KeyEvent;
           import android.view.WindowManager;
           import android.webkit.ValueCallback;
           import com.getcapacitor.BridgeActivity;
           import org.json.JSONObject;
 
           public class MainActivity extends BridgeActivity {
+              private AlertDialog exitDialog;
+
               @Override
               public void onCreate(Bundle savedInstanceState) {
                   super.onCreate(savedInstanceState);
@@ -70,16 +75,59 @@ jobs:
 
               @Override
               public void onBackPressed() {
+                  if (exitDialog != null && exitDialog.isShowing()) {
+                      exitDialog.dismiss();
+                      finish();
+                      return;
+                  }
                   getBridge().getWebView().evaluateJavascript(
                       "typeof topLayerClose==='function' && topLayerClose()",
                       new ValueCallback<String>() {
                           @Override
                           public void onReceiveValue(String value) {
                               if (!"true".equals(value)) {
-                                  MainActivity.super.onBackPressed();
+                                  showExitDialog();
                               }
                           }
                       });
+              }
+
+              private void showExitDialog() {
+                  if (isFinishing()) return;
+                  if (exitDialog != null && exitDialog.isShowing()) return;
+                  AlertDialog.Builder b = new AlertDialog.Builder(this);
+                  b.setTitle("Exit NTalk?");
+                  b.setMessage("Do you want to close the app?");
+                  b.setPositiveButton("Yes", new DialogInterface.OnClickListener() {
+                      @Override
+                      public void onClick(DialogInterface d, int which) {
+                          finish();
+                      }
+                  });
+                  b.setNegativeButton("No", null);
+                  exitDialog = b.create();
+                  exitDialog.setCanceledOnTouchOutside(false);
+                  exitDialog.setOnKeyListener(new DialogInterface.OnKeyListener() {
+                      @Override
+                      public boolean onKey(DialogInterface d, int keyCode, KeyEvent event) {
+                          if (keyCode == KeyEvent.KEYCODE_BACK && event.getAction() == KeyEvent.ACTION_UP) {
+                              d.dismiss();
+                              finish();
+                              return true;
+                          }
+                          return false;
+                      }
+                  });
+                  exitDialog.setOnCancelListener(new DialogInterface.OnCancelListener() {
+                      @Override
+                      public void onCancel(DialogInterface d) {
+                          finish();
+                      }
+                  });
+                  exitDialog.show();
+                  int pink = 0xFFFF4D9D;
+                  exitDialog.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(pink);
+                  exitDialog.getButton(AlertDialog.BUTTON_NEGATIVE).setTextColor(pink);
               }
           }
           EOF
