@@ -567,3 +567,6 @@ body.in-chat .sidebar{display:none !important}
 .pf-logout{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;margin:22px 0 30px;padding:15px;border-radius:16px;background:rgba(255,90,95,.1);border:1px solid rgba(255,90,95,.3);color:var(--danger);font-weight:700}
 .pf-logout .ui-icon{width:18px;height:18px}
 textarea.m-input{resize:none;font:inherit;width:100%}
+.pf-delete{margin-top:-14px;background:transparent;border-color:transparent}
+.m-ok.m-danger{background:linear-gradient(135deg,#ff5570,#d83f62);color:#fff}
+.m-ok:disabled{opacity:.45;cursor:not-allowed}

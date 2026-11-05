@@ -2279,7 +2279,40 @@ function profileView(){
  <h4 class="pf-h">App</h4>
  <div class="settings-card">${row("installApp()","download","Install NTalk","Add to your home screen",chev)}${row("forceUpdate()","download","Update app","Version "+APP_VERSION,chev)}</div>
  <button class="pf-logout" onclick="logout()">${ico("logout")} Log out</button>
+ <button class="pf-logout pf-delete" onclick="openDeleteAccount()">${ico("trash")} Delete account</button>
  </section>`;
+}
+/* ---- permanent account delete ---- */
+function openDeleteAccount(){
+ closeModal();
+ document.body.insertAdjacentHTML("beforeend",`<div id="modalRoot" class="modal-back" onclick="if(event.target===this)closeModal()"><div class="modal"><h3>Delete account permanently?</h3><p class="muted">Your account, profile, photos, files, statuses and every message you sent will be deleted for everyone. Your private chats are removed. Groups stay, you just leave them. This cannot be undone.</p><p class="muted">Type <b>DELETE</b> to confirm</p><input id="delConfirm" class="m-input" autocomplete="off" autocapitalize="characters" placeholder="DELETE" oninput="document.getElementById('delGo').disabled=this.value.trim()!=='DELETE'"><div class="modal-actions"><button class="m-cancel" onclick="closeModal()">Cancel</button><button id="delGo" class="m-ok m-danger" disabled onclick="deleteMyAccount()">Delete forever</button></div></div></div>`);
+ setTimeout(()=>document.getElementById("delConfirm")?.focus(),60);
+}
+async function deleteMyAccount(){
+ const inp=document.getElementById("delConfirm"),btn=document.getElementById("delGo");
+ if(!inp||inp.value.trim()!=="DELETE"||!state.user)return;
+ btn.disabled=true;btn.textContent="Deleting...";
+ const id=state.user.id;
+ try{
+  for(const bucket of ["ntalk-media","ntalk-avatars"]){
+   for(let n=0;n<20;n++){
+    const {data}=await sb.storage.from(bucket).list(id,{limit:1000});
+    if(!data||!data.length)break;
+    const {error:re}=await sb.storage.from(bucket).remove(data.map(f=>id+"/"+f.name));
+    if(re)break;
+   }
+  }
+  const {error}=await sb.rpc("delete_my_account");
+  if(error)throw error;
+ }catch(e){
+  console.warn("delete account",e);
+  btn.disabled=false;btn.textContent="Delete forever";
+  alert("Could not delete the account: "+(e.message||e)+"\n\nIf it says the function does not exist, run supabase_delete_account.sql in Supabase first.");
+  return;
+ }
+ closeModal();
+ await logout();
+ try{alert("Your account has been deleted permanently.")}catch(e){}
 }
 function editAbout(){
  closeModal();
