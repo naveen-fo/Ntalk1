@@ -137,6 +137,8 @@ async function loadProfile(user){
  const {data}=await sb.from("profiles").select("*").eq("id",user.id).maybeSingle();
  state.user={id:user.id,email:user.email,name:data?.full_name||data?.display_name||user.user_metadata?.full_name||user.user_metadata?.name||user.user_metadata?.display_name||user.email.split("@")[0],username:"@"+(data?.username||user.user_metadata?.username||"user"),avatar_url:data?.avatar_url||user.user_metadata?.avatar_url||null,about:data?.about||"",needsSetup:!!data?.needs_setup};
  saveUser();
+ state.isOwner=false;
+ try{sb.rpc("is_app_owner").then(r=>{const o=r&&r.data===true;if(state.isOwner!==o){state.isOwner=o;if(state.user&&state.page==="profile"&&!document.getElementById("modalRoot"))render()}},()=>{})}catch(e){}
 }
 async function logout(){
  try{if(state.channel)await sb.removeChannel(state.channel);if(state.presence)await sb.removeChannel(state.presence);if(state.signal)await sb.removeChannel(state.signal);if(state.typingCh)await sb.removeChannel(state.typingCh);await unregisterPush();await sb.auth.signOut();}catch{}
@@ -2278,9 +2280,56 @@ function profileView(){
  <div class="settings-card">${row("toggleTheme()","moon","Dark mode","Switch between dark and light",sw)}</div>
  <h4 class="pf-h">App</h4>
  <div class="settings-card">${row("installApp()","download","Install NTalk","Add to your home screen",chev)}${row("forceUpdate()","download","Update app","Version "+APP_VERSION,chev)}</div>
+ ${state.isOwner?`<h4 class="pf-h">Owner</h4><div class="settings-card">${row("openAdminUsers()","user","Manage users","Delete other users' accounts",chev)}</div>`:""}
  <button class="pf-logout" onclick="logout()">${ico("logout")} Log out</button>
  <button class="pf-logout pf-delete" onclick="openDeleteAccount()">${ico("trash")} Delete account</button>
  </section>`;
+}
+/* ---- owner: delete other users ---- */
+async function openAdminUsers(){
+ closeModal();
+ document.body.insertAdjacentHTML("beforeend",`<div id="modalRoot" class="modal-back" onclick="if(event.target===this)closeModal()"><div class="modal"><h3>Manage users</h3><input class="m-input" placeholder="Search name, username or email" oninput="adminFilter(this.value)" autocomplete="off"><div id="adminList" class="pick-list"><p class="muted">Loading...</p></div><div class="modal-actions"><button class="m-cancel" onclick="closeModal()">Close</button></div></div></div>`);
+ const {data,error}=await sb.rpc("admin_list_users");
+ const box=document.getElementById("adminList");if(!box)return;
+ if(error){box.innerHTML=`<p class="muted">${esc(error.message||"Not allowed")}</p>`;return}
+ state._admUsers=data||[];adminFilter("");
+}
+function adminFilter(q){
+ const box=document.getElementById("adminList");if(!box)return;
+ q=(q||"").trim().toLowerCase();
+ const rows=(state._admUsers||[]).filter(u=>!q||[u.email,u.username,u.display_name].some(x=>(x||"").toLowerCase().includes(q)));
+ box.innerHTML=rows.length?rows.map(u=>`<div class="pick-row" onclick="adminAskDelete('${esc(u.id)}')"><div class="avatar sm">${esc(avatarName(u.display_name||u.username||u.email))}</div><span class="grow">${esc(u.display_name||u.username||"User")}<br><small class="muted">${esc(u.email||"")}</small></span></div>`).join(""):`<p class="muted">No users found</p>`;
+}
+function adminAskDelete(id){
+ const u=(state._admUsers||[]).find(x=>x.id===id);if(!u)return;
+ state._admTarget=u;
+ closeModal();
+ document.body.insertAdjacentHTML("beforeend",`<div id="modalRoot" class="modal-back" onclick="if(event.target===this)closeModal()"><div class="modal"><h3>Delete this user?</h3><p class="muted"><b>${esc(u.display_name||u.username||"User")}</b><br>${esc(u.email||"")}</p><p class="muted">Their account, files, statuses and every message they sent are deleted permanently. Their private chats are removed. Groups stay. This cannot be undone.</p><p class="muted">Type <b>DELETE</b> to confirm</p><input id="admConfirm" class="m-input" autocomplete="off" autocapitalize="characters" placeholder="DELETE" oninput="document.getElementById('admGo').disabled=this.value.trim()!=='DELETE'"><div class="modal-actions"><button class="m-cancel" onclick="openAdminUsers()">Back</button><button id="admGo" class="m-ok m-danger" disabled onclick="adminDeleteUser()">Delete forever</button></div></div></div>`);
+}
+async function adminDeleteUser(){
+ const u=state._admTarget,inp=document.getElementById("admConfirm"),btn=document.getElementById("admGo");
+ if(!u||!inp||inp.value.trim()!=="DELETE"||!state.isOwner)return;
+ btn.disabled=true;btn.textContent="Deleting...";
+ try{
+  for(const bucket of ["ntalk-media","ntalk-avatars"]){
+   for(let n=0;n<20;n++){
+    const {data}=await sb.storage.from(bucket).list(u.id,{limit:1000});
+    if(!data||!data.length)break;
+    const {error:re}=await sb.storage.from(bucket).remove(data.map(f=>u.id+"/"+f.name));
+    if(re)break;
+   }
+  }
+  const {error}=await sb.rpc("admin_delete_user",{p_user:u.id});
+  if(error)throw error;
+ }catch(e){
+  console.warn("admin delete",e);
+  btn.disabled=false;btn.textContent="Delete forever";
+  alert("Could not delete the user: "+(e.message||e)+"\n\nIf it says the function does not exist, run supabase_admin_delete.sql in Supabase first.");
+  return;
+ }
+ state._admUsers=(state._admUsers||[]).filter(x=>x.id!==u.id);
+ try{await loadChats()}catch(e){}
+ openAdminUsers();
 }
 /* ---- permanent account delete ---- */
 function openDeleteAccount(){
